@@ -4,6 +4,10 @@ import { HashRouter, Routes, Route } from 'react-router-dom';
 import App from './App.tsx';
 import Profile from './Profile.tsx';
 import './index.css';
+import { registerSW } from 'virtual:pwa-register';
+
+// Register the service worker for PWA support
+registerSW({ immediate: true });
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

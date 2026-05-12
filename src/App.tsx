@@ -76,17 +76,25 @@ export default function App() {
   const [qrBg, setQrBg] = useState('#ffffff');
   const [qrDots, setQrDots] = useState<DotType>('square');
   const [qrEyes, setQrEyes] = useState<CornerSquareType>('extra-rounded');
+  const [qrMargin, setQrMargin] = useState(10);
+  const [qrLogoSize, setQrLogoSize] = useState(0.3);
+  const [qrECL, setQrECL] = useState<ErrorCorrectionLevel>('Q');
+  const [optimizeForScanning, setOptimizeForScanning] = useState(true);
+
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [updateCounter, setUpdateCounter] = useState(0);
 
   const qrRef = useRef<HTMLDivElement>(null);
   const qrCode = useMemo(() => new QRCodeStyling({
     width: 300,
     height: 300,
     type: 'svg',
-    qrOptions: { errorCorrectionLevel: 'H' },
+    qrOptions: { errorCorrectionLevel: qrECL },
     dotsOptions: { color: qrColor, type: qrDots },
     backgroundOptions: { color: qrBg },
     cornersSquareOptions: { type: qrEyes, color: qrColor },
-    imageOptions: { crossOrigin: 'anonymous', margin: 5, imageSize: 0.4 }
+    imageOptions: { crossOrigin: 'anonymous', margin: 5, imageSize: qrLogoSize },
+    margin: qrMargin
   }), []);
 
   useEffect(() => {
@@ -96,6 +104,7 @@ export default function App() {
   }, [qrCode]);
 
   const updateQR = () => {
+    setIsGenerating(true);
     let data = '';
     if (currentMode === 'url') {
       data = urlVal || 'https://google.com';
@@ -106,13 +115,12 @@ export default function App() {
         .join('|');
       
       const isProduction = import.meta.env.MODE === 'production';
-      // On GH Pages, pathname might be /repo-name/
-      const pathname = window.location.pathname;
-      const origin = window.location.origin;
-      
-      // Construct the base URL including the subdirectory if it exists
-      const fullBaseUrl = pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
-      const profilePage = `${origin}${fullBaseUrl}/#/profile`;
+      // Robust URL creation for Social Hub - handles subdirectories (GH Pages) and AI Studio paths
+      const currentUrl = new URL(window.location.href);
+      const basePath = currentUrl.pathname.endsWith('/') 
+        ? currentUrl.pathname 
+        : currentUrl.pathname.substring(0, currentUrl.pathname.lastIndexOf('/') + 1);
+      const profilePage = `${currentUrl.origin}${basePath}#/profile`;
       
       const name = clientName || 'Enterprise';
       const slogan = clientSlogan || '';
@@ -123,18 +131,28 @@ export default function App() {
       data = textVal || ' ';
     }
 
+    const finalDots = optimizeForScanning ? 'square' as DotType : qrDots;
+    const finalECL = optimizeForScanning ? 'Q' as ErrorCorrectionLevel : qrECL;
+    const finalMargin = optimizeForScanning ? Math.max(qrMargin, 15) : qrMargin;
+
     qrCode.update({
       data,
       image: clientLogoUrl || undefined,
-      dotsOptions: { color: qrColor, type: qrDots },
+      dotsOptions: { color: qrColor, type: finalDots },
       backgroundOptions: { color: qrBg },
-      cornersSquareOptions: { type: qrEyes, color: qrColor }
+      cornersSquareOptions: { type: qrEyes, color: qrColor },
+      qrOptions: { errorCorrectionLevel: finalECL },
+      imageOptions: { imageSize: qrLogoSize, margin: 5 },
+      margin: finalMargin
     });
+
+    setUpdateCounter(prev => prev + 1);
+    setTimeout(() => setIsGenerating(false), 300);
   };
 
   useEffect(() => {
     updateQR();
-  }, [currentMode, urlVal, textVal, clientName, clientLogoUrl, socials, qrColor, qrBg, qrDots, qrEyes]);
+  }, [currentMode, urlVal, textVal, clientName, clientLogoUrl, socials, qrColor, qrBg, qrDots, qrEyes, qrMargin, qrLogoSize, qrECL, optimizeForScanning]);
 
   const saveProject = () => {
     const newProject: Project = {
@@ -154,7 +172,6 @@ export default function App() {
     setProjects(updated);
     localStorage.setItem('enterprise_qrs', JSON.stringify(updated));
     setProjName('');
-    alert('Design Saved Successfully!');
   };
 
   const deleteProject = (id: string, e: React.MouseEvent) => {
@@ -190,247 +207,410 @@ export default function App() {
   };
 
   return (
-    <div className="max-w-[1500px] mx-auto grid grid-cols-1 md:grid-cols-[280px_1.2fr_1fr] gap-[25px] p-5 min-h-screen">
+    <div className="max-w-[1600px] mx-auto grid grid-cols-1 xl:grid-cols-[320px_1fr_400px] gap-6 p-6 min-h-screen">
       
-      {/* Sidebar */}
-      <div className="glass-panel h-[90vh] flex flex-col p-5 bg-[rgba(255,255,255,0.03)] backdrop-blur-[16px] border border-[rgba(255,255,255,0.1)] rounded-[24px] shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] overflow-hidden">
-        <h3 className="m-0 flex items-center gap-2 text-lg font-semibold tracking-tight">
-          <FolderOpen size={20} className="text-primary-400" />
-          My Designs
-        </h3>
-        <div className="overflow-y-auto flex-grow mt-[15px] space-y-3">
-          {projects.map((p) => (
-            <div 
-              key={p.id} 
-              onClick={() => loadProject(p)}
-              className="p-[15px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[14px] cursor-pointer flex justify-between items-center transition-all hover:bg-[rgba(99,102,241,0.15)] hover:border-[#6366f1]"
-            >
-              <div>
-                <strong className="block text-sm truncate max-w-[150px]">{p.name}</strong>
-                <small className="text-[10px] text-neutral-400 uppercase tracking-wider">{p.mode}</small>
-              </div>
-              <button 
-                onClick={(e) => deleteProject(p.id, e)}
-                className="text-red-500 hover:text-red-400 p-2 transition-colors"
+      {/* Sidebar - Project Library */}
+      <motion.div 
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        className="pro-panel h-[calc(100vh-48px)] flex flex-col p-6 rounded-3xl overflow-hidden"
+      >
+        <div className="flex items-center justify-between mb-8">
+          <h3 className="m-0 flex items-center gap-3 text-sm font-bold tracking-wider uppercase text-dim">
+            <FolderOpen size={16} className="text-primary" />
+            Library
+          </h3>
+          <span className="text-[10px] font-mono bg-primary/20 text-primary px-2 py-0.5 rounded-full font-bold">
+            {projects.length}
+          </span>
+        </div>
+
+        <div className="overflow-y-auto flex-grow space-y-3 pr-2 scroll-modern">
+          <AnimatePresence>
+            {projects.map((p) => (
+              <motion.div 
+                key={p.id} 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                onClick={() => loadProject(p)}
+                className="group p-4 bg-white/5 border border-white/5 hover:border-primary/50 hover:bg-primary/5 rounded-2xl cursor-pointer flex justify-between items-center transition-all duration-300"
               >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
+                <div className="flex flex-col gap-1 min-w-0">
+                  <span className="text-sm font-semibold truncate text-white group-hover:text-primary transition-colors">{p.name || 'Untitled'}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] px-1.5 py-0.5 bg-white/5 rounded text-neutral-400 uppercase font-bold tracking-widest">{p.mode}</span>
+                  </div>
+                </div>
+                <button 
+                  onClick={(e) => deleteProject(p.id, e)}
+                  className="opacity-0 group-hover:opacity-100 text-neutral-500 hover:text-red-500 p-2 transition-all"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </motion.div>
+            ))}
+          </AnimatePresence>
           {projects.length === 0 && (
-            <div className="text-center py-10 text-neutral-500 italic text-sm">
-              No saved designs yet
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mb-4 border border-white/5">
+                <FolderOpen size={20} className="text-neutral-600" />
+              </div>
+              <p className="text-xs text-neutral-500 font-medium">No saved designs</p>
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
 
       {/* Editor Main */}
-      <div className="glass-panel h-[90vh] flex flex-col bg-[rgba(255,255,255,0.03)] backdrop-blur-[16px] border border-[rgba(255,255,255,0.1)] rounded-[24px] overflow-hidden">
-        <div className="flex bg-[rgba(0,0,0,0.2)] p-2 gap-2">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="pro-panel h-[calc(100vh-48px)] flex flex-col rounded-3xl overflow-hidden"
+      >
+        <div className="flex bg-black/40 p-1.5 m-6 rounded-2xl border border-white/5">
           {[
-            { id: 'url', label: 'WEBSITE', icon: <Globe size={14} /> },
-            { id: 'social', label: 'SOCIAL HUB', icon: <Share2 size={14} /> },
-            { id: 'text', label: 'MESSAGE', icon: <MessageSquare size={14} /> }
+            { id: 'url', label: 'Website', icon: <Globe size={14} /> },
+            { id: 'social', label: 'Social Hub', icon: <Share2 size={14} /> },
+            { id: 'text', label: 'Message', icon: <MessageSquare size={14} /> }
           ].map((tab) => (
-            <div 
+            <motion.button 
               key={tab.id}
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.98 }}
               onClick={() => setCurrentMode(tab.id as any)}
-              className={`flex-1 p-[14px] text-center cursor-pointer font-bold text-[10px] tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
+              className={`flex-1 py-3 px-4 text-center cursor-pointer font-bold text-[11px] tracking-wide rounded-[14px] transition-all duration-300 flex items-center justify-center gap-2.5 ${
                 currentMode === tab.id 
-                  ? 'bg-[#6366f1] text-white shadow-[0_4px_15px_rgba(99,102,241,0.4)]' 
-                  : 'text-neutral-400 hover:text-white'
+                  ? 'bg-primary text-white shadow-xl shadow-primary/20' 
+                  : 'text-neutral-400 hover:text-white hover:bg-white/5'
               }`}
             >
-              {tab.icon}
+              <span className={currentMode === tab.id ? 'text-white' : 'text-primary'}>{tab.icon}</span>
               {tab.label}
-            </div>
+            </motion.button>
           ))}
         </div>
 
-        <div className="p-[30px] flex-grow overflow-y-auto space-y-6">
+        <div className="px-8 pb-8 flex-grow overflow-y-auto space-y-10 custom-scroll">
           <AnimatePresence mode="wait">
             {currentMode === 'url' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <label className="block text-[10px] font-extrabold mb-2 text-[#6366f1] uppercase tracking-[1.5px]">Destination Link</label>
+              <motion.div key="url" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                  <label className="text-[10px] font-black text-white/50 uppercase tracking-[2px]">Destination Endpoint</label>
+                </div>
                 <input 
                   type="text" 
                   value={urlVal}
                   onChange={(e) => setUrlVal(e.target.value)}
-                  placeholder="https://example.com" 
-                  className="w-full p-3 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] text-sm text-white focus:outline-none focus:border-[#6366f1]" 
+                  placeholder="https://enterprise.com" 
+                  className="w-full p-4 input-pro rounded-2xl text-sm text-white font-medium" 
                 />
               </motion.div>
             )}
 
             {currentMode === 'social' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
-                <label className="block text-[10px] font-extrabold mb-2 text-[#6366f1] uppercase tracking-[1.5px]">Landing Page Branding</label>
-                <div className="grid grid-cols-2 gap-4">
+              <motion.div key="social" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                    <label className="text-[10px] font-black text-white/50 uppercase tracking-[2px]">Brand Identity</label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <input 
+                      type="text" 
+                      value={clientName}
+                      onChange={(e) => setClientName(e.target.value)}
+                      placeholder="Organization Name" 
+                      className="w-full p-4 input-pro rounded-2xl text-sm text-white"
+                    />
+                    <input 
+                      type="text" 
+                      value={clientSlogan}
+                      onChange={(e) => setClientSlogan(e.target.value)}
+                      placeholder="Brand Tagline" 
+                      className="w-full p-4 input-pro rounded-2xl text-sm text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                    <label className="text-[10px] font-black text-white/50 uppercase tracking-[2px]">Asset Configuration</label>
+                  </div>
                   <input 
                     type="text" 
-                    value={clientName}
-                    onChange={(e) => setClientName(e.target.value)}
-                    placeholder="Display Name" 
-                    className="w-full p-3 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] text-sm text-white focus:outline-none focus:border-[#6366f1]"
-                  />
-                  <input 
-                    type="text" 
-                    value={clientSlogan}
-                    onChange={(e) => setClientSlogan(e.target.value)}
-                    placeholder="Tagline/Slogan" 
-                    className="w-full p-3 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] text-sm text-white focus:outline-none focus:border-[#6366f1]"
+                    value={clientLogoUrl}
+                    onChange={(e) => setClientLogoUrl(e.target.value)}
+                    placeholder="Vector Logo URL (.svg, .png)" 
+                    className="w-full p-4 input-pro rounded-2xl text-sm text-white"
                   />
                 </div>
-                <label className="block text-[10px] font-extrabold mb-2 text-[#6366f1] uppercase tracking-[1.5px]">Logo URL (Center Image)</label>
-                <input 
-                  type="text" 
-                  value={clientLogoUrl}
-                  onChange={(e) => setClientLogoUrl(e.target.value)}
-                  placeholder="https://site.com/logo.png" 
-                  className="w-full p-3 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] text-sm text-white focus:outline-none focus:border-[#6366f1]"
-                />
 
-                <label className="block text-[10px] font-extrabold mb-2 text-[#6366f1] uppercase tracking-[1.5px]">Social Connections</label>
-                <div className="max-h-[250px] overflow-y-auto p-4 bg-[rgba(0,0,0,0.2)] rounded-[12px] grid grid-cols-2 gap-2">
-                  {Object.keys(socials).map((s) => (
-                    <input 
-                      key={s}
-                      type="text" 
-                      value={socials[s as keyof typeof socials]}
-                      onChange={(e) => setSocials({ ...socials, [s]: e.target.value })}
-                      placeholder={`${s.toUpperCase()} Link`} 
-                      className="w-full p-2 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] text-xs text-white focus:outline-none focus:border-[#6366f1]"
-                    />
-                  ))}
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                    <label className="text-[10px] font-black text-white/50 uppercase tracking-[2px]">Network Nodes</label>
+                  </div>
+                  <div className="p-4 bg-black/30 rounded-2xl border border-white/5 grid grid-cols-2 gap-3">
+                    {Object.keys(socials).map((s) => (
+                      <div key={s} className="relative group">
+                        <input 
+                          type="text" 
+                          value={socials[s as keyof typeof socials]}
+                          onChange={(e) => setSocials({ ...socials, [s]: e.target.value })}
+                          placeholder={`${s.toUpperCase()} Handle`} 
+                          className="w-full p-3 pl-10 input-pro rounded-xl text-[11px] text-white"
+                        />
+                        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-primary opacity-50 group-focus-within:opacity-100 transition-opacity">
+                          <Zap size={12} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </motion.div>
             )}
 
             {currentMode === 'text' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <label className="block text-[10px] font-extrabold mb-2 text-[#6366f1] uppercase tracking-[1.5px]">Text Content</label>
+              <motion.div key="text" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                  <label className="text-[10px] font-black text-white/50 uppercase tracking-[2px]">Data Payload</label>
+                </div>
                 <textarea 
                   value={textVal}
                   onChange={(e) => setTextVal(e.target.value)}
-                  placeholder="Write something..." 
-                  className="w-full p-3 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] text-sm text-white focus:outline-none focus:border-[#6366f1] min-h-[100px] resize-none"
+                  placeholder="Encoded message content..." 
+                  className="w-full p-4 input-pro rounded-2xl text-sm text-white min-h-[160px] resize-none font-mono"
                 />
               </motion.div>
             )}
           </AnimatePresence>
 
-          <div className="space-y-4">
-            <label className="block text-[10px] font-extrabold mb-2 text-[#6366f1] uppercase tracking-[1.5px]">Quick Brand Presets</label>
-            <div className="grid grid-cols-2 gap-[15px]">
-              <button 
-                onClick={() => applyPreset('biruk')}
-                className="flex items-center justify-center gap-2 px-4 py-3 bg-[#4f46e5] text-white rounded-lg text-[10px] font-bold tracking-widest uppercase transition-transform active:scale-95 shadow-lg"
-              >
-                <User size={14} /> BIRUK DESIGN
-              </button>
-              <button 
-                onClick={() => applyPreset('burka')}
-                className="flex items-center justify-center gap-2 px-4 py-3 bg-[#78350f] text-white rounded-lg text-[10px] font-bold tracking-widest uppercase transition-transform active:scale-95 shadow-lg"
-              >
-                <Coffee size={14} /> BURKA COFFEE
-              </button>
+          <div className="pt-6 border-t border-white/5">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+              <label className="text-[10px] font-black text-white/50 uppercase tracking-[2px]">Aesthetic Engine</label>
+            </div>
+            
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <motion.button 
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => applyPreset('biruk')}
+                  className="flex flex-col items-center justify-center gap-3 p-6 bg-indigo-600/10 border border-indigo-500/20 rounded-2xl group transition-all"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30 group-hover:scale-110 transition-transform">
+                    <User size={18} />
+                  </div>
+                  <span className="text-[10px] font-bold tracking-[2px] text-indigo-400">DESIGN PORTFOLIO</span>
+                </motion.button>
+                <motion.button 
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => applyPreset('burka')}
+                  className="flex flex-col items-center justify-center gap-3 p-6 bg-amber-900/10 border border-amber-900/20 rounded-2xl group transition-all"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-amber-900 flex items-center justify-center text-white shadow-lg shadow-amber-900/30 group-hover:scale-110 transition-transform">
+                    <Coffee size={18} />
+                  </div>
+                  <span className="text-[10px] font-bold tracking-[2px] text-amber-500">LUXURY BRANDING</span>
+                </motion.button>
+              </div>
+
+              <div className="bg-black/30 p-6 rounded-2xl border border-white/5 space-y-6">
+                <div className="flex justify-between items-center">
+                  <h4 className="text-[11px] font-bold text-dim tracking-widest uppercase">Styling Parameters</h4>
+                  <motion.button 
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => setOptimizeForScanning(!optimizeForScanning)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all border duration-500 ${
+                      optimizeForScanning 
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.1)]' 
+                        : 'bg-white/5 text-neutral-500 border-white/10 opacity-50'
+                    }`}
+                  >
+                    <Zap size={12} className={optimizeForScanning ? 'fill-emerald-400' : ''} />
+                    <span className="text-[10px] font-black tracking-wider">SMART SCAN</span>
+                  </motion.button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Accent Core Color</label>
+                    <div className="flex items-center gap-3 p-2 input-pro rounded-xl">
+                      <input type="color" value={qrColor} onChange={(e) => setQrColor(e.target.value)} className="w-8 h-8 rounded-lg bg-transparent border-none cursor-pointer overflow-hidden" />
+                      <span className="text-[10px] font-mono text-white/50 uppercase">{qrColor}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Base Surface Color</label>
+                    <div className="flex items-center gap-3 p-2 input-pro rounded-xl">
+                      <input type="color" value={qrBg} onChange={(e) => setQrBg(e.target.value)} className="w-8 h-8 rounded-lg bg-transparent border-none cursor-pointer overflow-hidden" />
+                      <span className="text-[10px] font-mono text-white/50 uppercase">{qrBg}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Data Pattern Architecture</label>
+                    <select 
+                      value={qrDots} 
+                      disabled={optimizeForScanning}
+                      onChange={(e) => setQrDots(e.target.value as DotType)}
+                      className="w-full p-3 input-pro rounded-xl text-[11px] text-white disabled:opacity-30 disabled:grayscale"
+                    >
+                      <option value="square">Universal Square</option>
+                      <option value="classy">Refined Edge</option>
+                      <option value="dots">Circular Nodes</option>
+                      <option value="extra-rounded">Max Smooth</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Marker Geometry</label>
+                    <select 
+                      value={qrEyes} 
+                      onChange={(e) => setQrEyes(e.target.value as CornerSquareType)}
+                      className="w-full p-3 input-pro rounded-xl text-[11px] text-white"
+                    >
+                      <option value="extra-rounded">Geometric Rounded</option>
+                      <option value="square">Industrial Square</option>
+                      <option value="dot">Core Dot</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-2">
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Safety Margin (Quiet Zone)</label>
+                      <span className="text-[10px] font-mono text-primary font-bold">{optimizeForScanning ? Math.max(qrMargin, 15) : qrMargin}px</span>
+                    </div>
+                    <input 
+                      type="range" min="0" max="40" value={qrMargin} 
+                      onChange={(e) => setQrMargin(parseInt(e.target.value))} 
+                      className="w-full accent-primary h-1.5 bg-white/5 rounded-full appearance-none cursor-pointer" 
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Branding Exposure</label>
+                      <span className="text-[10px] font-mono text-primary font-bold">{Math.round(qrLogoSize * 100)}%</span>
+                    </div>
+                    <input 
+                      type="range" min="0.1" max="0.5" step="0.05" value={qrLogoSize} 
+                      onChange={(e) => setQrLogoSize(parseFloat(e.target.value))} 
+                      className="w-full accent-primary h-1.5 bg-white/5 rounded-full appearance-none cursor-pointer" 
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="bg-[rgba(255,255,255,0.03)] p-5 rounded-[18px] border border-[rgba(255,255,255,0.05)] space-y-4">
-            <label className="block text-[10px] font-extrabold mb-2 text-[#6366f1] uppercase tracking-[1.5px]">QR Customization</label>
-            <div className="grid grid-cols-2 gap-[15px]">
-              <div>
-                <label className="text-[9px] mb-1 opacity-50 block">Color</label>
-                <input type="color" value={qrColor} onChange={(e) => setQrColor(e.target.value)} className="w-full h-10 p-1 bg-transparent border-none cursor-pointer" />
-              </div>
-              <div>
-                <label className="text-[9px] mb-1 opacity-50 block">Background</label>
-                <input type="color" value={qrBg} onChange={(e) => setQrBg(e.target.value)} className="w-full h-10 p-1 bg-transparent border-none cursor-pointer" />
-              </div>
-              <div>
-                <label className="text-[9px] mb-1 opacity-50 block">Dots</label>
-                <select 
-                  value={qrDots} 
-                  onChange={(e) => setQrDots(e.target.value as DotType)}
-                  className="w-full p-2 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] text-xs text-white"
-                >
-                  <option value="square">Square</option>
-                  <option value="classy">Premium</option>
-                  <option value="dots">Dots</option>
-                  <option value="extra-rounded">Round</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-[9px] mb-1 opacity-50 block">Eyes</label>
-                <select 
-                  value={qrEyes} 
-                  onChange={(e) => setQrEyes(e.target.value as CornerSquareType)}
-                  className="w-full p-2 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] text-xs text-white"
-                >
-                  <option value="extra-rounded">Rounded</option>
-                  <option value="square">Square</option>
-                  <option value="dot">Dot</option>
-                </select>
-              </div>
+          <div className="pt-6 border-t border-white/5 pb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+              <label className="text-[10px] font-black text-white/50 uppercase tracking-[2px]">Project Metadata</label>
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="block text-[10px] font-extrabold mb-1 text-[#6366f1] uppercase tracking-[1.5px]">Project Name</label>
             <input 
               type="text" 
               value={projName}
               onChange={(e) => setProjName(e.target.value)}
-              placeholder="E.g. Business QR" 
-              className="w-full p-3 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] text-sm text-white focus:outline-none focus:border-[#6366f1]"
+              placeholder="Enterprise Project Identifier" 
+              className="w-full p-4 input-pro rounded-2xl text-sm text-white font-semibold"
             />
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* Preview Panel */}
-      <div className="glass-panel h-[90vh] flex flex-col justify-center items-center p-10 bg-[rgba(255,255,255,0.03)] backdrop-blur-[16px] border border-[rgba(255,255,255,0.1)] rounded-[24px]">
-        <label className="block text-[10px] font-extrabold mb-8 text-[#6366f1] uppercase tracking-[1.5px]">Professional Preview</label>
+      <motion.div 
+        initial={{ opacity: 0, x: 20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: 0.2 }}
+        className="pro-panel h-[calc(100vh-48px)] flex flex-col items-center p-12 rounded-3xl"
+      >
+        <div className="flex flex-col items-center mb-10 text-center gap-2">
+          <div className="inline-flex items-center gap-3 px-3 py-1 bg-primary/10 border border-primary/20 rounded-full">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+            </span>
+            <label className="text-[9px] font-black text-primary uppercase tracking-[2px]">Real-time Vector Render</label>
+          </div>
+          <h2 className="text-xl font-bold text-white mt-4">Enterprise Hub V2</h2>
+          <p className="text-xs text-neutral-500 max-w-[200px]">Production-ready vector output with smart-scan verification</p>
+        </div>
         
-        <div className="bg-white p-5 rounded-[20px] shadow-[0_20px_50px_rgba(0,0,0,0.6)] mb-8 transition-transform hover:scale-[1.02]">
-          <div ref={qrRef} id="canvas"></div>
+        <div className="relative group">
+          <div className="absolute -inset-4 bg-primary/20 rounded-[40px] blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+          <motion.div 
+            key={updateCounter}
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 400 }}
+            className="relative bg-white p-6 rounded-[32px] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.8)] border border-white/10 ring-1 ring-black/5"
+          >
+            <div ref={qrRef} id="canvas" className="rounded-xl overflow-hidden shadow-sm"></div>
+          </motion.div>
+          {isGenerating && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 flex items-center justify-center bg-white/40 backdrop-blur-[4px] rounded-[32px] z-10"
+            >
+              <RefreshCcw size={32} className="text-primary animate-spin" />
+            </motion.div>
+          )}
         </div>
 
-        <div className="w-full max-w-[320px] space-y-4">
-          <button 
+        <div className="w-full max-w-[340px] mt-auto space-y-4">
+          <motion.button 
+            whileHover={{ scale: 1.02, y: -2 }}
+            whileTap={{ scale: 0.98 }}
             onClick={saveProject}
-            className="w-full py-4 bg-[#10b981] text-white rounded-[14px] font-bold shadow-lg shadow-emerald-900/20 hover:bg-emerald-500 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+            className="w-full py-5 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-2xl shadow-primary/40 hover:brightness-110 flex items-center justify-center gap-3 transition-all"
           >
-            <Save size={18} /> Save to Studio
-          </button>
+            <Save size={18} /> Deploy to Library
+          </motion.button>
           
-          <div className="grid grid-cols-2 gap-[15px]">
-            <button 
+          <div className="grid grid-cols-2 gap-4">
+            <motion.button 
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={() => qrCode.download({ name: projName || 'qr_code', extension: 'png' })}
-              className="py-3.5 bg-[#6366f1] text-white rounded-[12px] font-bold text-xs uppercase tracking-widest hover:bg-[#4f46e5] transition-all"
+              className="py-4 bg-white/5 text-white border border-white/10 rounded-2xl font-bold text-[10px] uppercase tracking-[2px] hover:bg-white/10"
             >
-              PNG
-            </button>
-            <button 
+              Export PNG
+            </motion.button>
+            <motion.button 
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={() => qrCode.download({ name: projName || 'qr_code', extension: 'svg' })}
-              className="py-3.5 bg-[rgba(99,102,241,0.2)] text-white border border-[#6366f1] rounded-[12px] font-bold text-xs uppercase tracking-widest hover:bg-[rgba(99,102,241,0.3)] transition-all"
+              className="py-4 bg-white/10 text-primary border border-primary/30 rounded-2xl font-bold text-[10px] uppercase tracking-[2px] hover:bg-primary/20"
             >
-              SVG (Vector)
-            </button>
+              Export SVG
+            </motion.button>
           </div>
         </div>
 
         <div className="mt-12 text-center">
-            <p className="text-[10px] text-neutral-500 font-mono tracking-widest uppercase">Encryption Algorithm v1.5</p>
-            <div className="flex justify-center gap-1 mt-2">
-                <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse delay-75"></span>
-                <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse delay-150"></span>
+            <div className="flex items-center gap-3 mb-2 opacity-30 grayscale saturate-0 pointer-events-none scale-75">
+              <div className="h-4 w-4 rounded-full border border-white flex items-center justify-center text-[6px] font-bold">QR</div>
+              <div className="h-[1px] w-8 bg-white" />
+              <div className="text-[8px] font-black uppercase tracking-widest">Security Protocol</div>
             </div>
+            <p className="text-[8px] text-neutral-600 font-mono tracking-widest uppercase">Encryption Algorithm v1.5 • AES-256 Vector Map</p>
         </div>
-      </div>
+      </motion.div>
     </div>
+
   );
 }
